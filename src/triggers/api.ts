@@ -832,13 +832,14 @@ export function registerApiTriggers(
     config: { api_path: "/agentmemory/file-context", http_method: "POST" },
   });
 
-  sdk.registerFunction("api::enrich", 
+  sdk.registerFunction("api::enrich",
     async (
       req: ApiRequest<{
         sessionId: string;
         files: string[];
         terms?: string[];
         toolName?: string;
+        project?: string;
       }>,
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
@@ -867,7 +868,25 @@ export function registerApiTriggers(
           body: { error: "terms must be an array of strings" },
         };
       }
-      const result = await sdk.trigger({ function_id: "mem::enrich", payload: req.body });
+      if (
+        req.body.project !== undefined &&
+        (typeof req.body.project !== "string" || !req.body.project.trim())
+      ) {
+        return {
+          status_code: 400,
+          body: { error: "project must be a non-empty string" },
+        };
+      }
+      const result = await sdk.trigger({
+        function_id: "mem::enrich",
+        payload: {
+          sessionId: req.body.sessionId,
+          files: req.body.files,
+          ...(req.body.terms !== undefined && { terms: req.body.terms }),
+          ...(req.body.toolName !== undefined && { toolName: req.body.toolName }),
+          ...(req.body.project !== undefined && { project: req.body.project }),
+        },
+      });
       return { status_code: 200, body: result };
     },
   );
@@ -877,13 +896,16 @@ export function registerApiTriggers(
     config: { api_path: "/agentmemory/enrich", http_method: "POST" },
   });
 
-  sdk.registerFunction("api::remember", 
+  sdk.registerFunction("api::remember",
     async (
       req: ApiRequest<{
         content: string;
         type?: string;
         concepts?: string[];
         files?: string[];
+        ttlDays?: number;
+        sourceObservationIds?: string[];
+        project?: string;
       }>,
     ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
@@ -895,7 +917,24 @@ export function registerApiTriggers(
       ) {
         return { status_code: 400, body: { error: "content is required" } };
       }
-      const result = await sdk.trigger({ function_id: "mem::remember", payload: req.body });
+      if (
+        req.body.project !== undefined &&
+        (typeof req.body.project !== "string" || !req.body.project.trim())
+      ) {
+        return { status_code: 400, body: { error: "project must be a non-empty string" } };
+      }
+      const result = await sdk.trigger({
+        function_id: "mem::remember",
+        payload: {
+          content: req.body.content,
+          ...(req.body.type !== undefined && { type: req.body.type }),
+          ...(req.body.concepts !== undefined && { concepts: req.body.concepts }),
+          ...(req.body.files !== undefined && { files: req.body.files }),
+          ...(req.body.ttlDays !== undefined && { ttlDays: req.body.ttlDays }),
+          ...(req.body.sourceObservationIds !== undefined && { sourceObservationIds: req.body.sourceObservationIds }),
+          ...(req.body.project !== undefined && { project: req.body.project }),
+        },
+      });
       return { status_code: 201, body: result };
     },
   );
@@ -975,14 +1014,30 @@ export function registerApiTriggers(
     config: { api_path: "/agentmemory/generate-rules", http_method: "POST" },
   });
 
-  sdk.registerFunction("api::migrate", 
-    async (req: ApiRequest<{ dbPath: string }>): Promise<Response> => {
+  sdk.registerFunction("api::migrate",
+    async (
+      req: ApiRequest<{ dbPath?: string; step?: string; dryRun?: boolean }>,
+    ): Promise<Response> => {
       const authErr = checkAuth(req, secret);
       if (authErr) return authErr;
-      if (!req.body?.dbPath || typeof req.body.dbPath !== "string") {
-        return { status_code: 400, body: { error: "dbPath is required" } };
+      const hasStep =
+        typeof req.body?.step === "string" && req.body.step.trim().length > 0;
+      const hasDbPath =
+        typeof req.body?.dbPath === "string" && req.body.dbPath.trim().length > 0;
+      if (!hasStep && !hasDbPath) {
+        return {
+          status_code: 400,
+          body: { error: "Either step (string) or dbPath (string) is required" },
+        };
       }
-      const result = await sdk.trigger({ function_id: "mem::migrate", payload: req.body });
+      const result = await sdk.trigger({
+        function_id: "mem::migrate",
+        payload: {
+          ...(req.body.step !== undefined && { step: req.body.step }),
+          ...(req.body.dbPath !== undefined && { dbPath: req.body.dbPath }),
+          ...(req.body.dryRun !== undefined && { dryRun: req.body.dryRun }),
+        },
+      });
       return { status_code: 200, body: result };
     },
   );
